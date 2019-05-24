@@ -9,6 +9,7 @@
 {-# LANGUAGE PolyKinds             #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
@@ -25,8 +26,7 @@ import qualified Data.Text       as Text
 
 This is an example data schema that has changed over time.
 
-Versions 1-3 all convert all of the time, however the change
-between 3 and 4 doesn't always work.
+At each change there is the possibility of failure.
 
 -}
 
@@ -62,12 +62,12 @@ data OldUser
 instance Versioned "User" 2 where
   type 2 `VersionOf` "User" = OldUser
 
-instance Upgradable "User" 2 where
-  upgrade = fromOlder
+instance Migratable "User" 2 where
+  fromPrevious = fromOlder
 
-fromOlder :: Older -> OldUser
+fromOlder :: Older -> Maybe OldUser
 fromOlder older
-  = OldUser { oldFirstName = Name (Text.pack (olderFirstName older))
+  = Just $ OldUser { oldFirstName = Name (Text.pack (olderFirstName older))
             , oldSurname   = Name (Text.pack (olderSurname older))
             , oldPet       = readPet (olderPet older)
             , oldAge       = olderAge older
@@ -101,12 +101,12 @@ data NewUser
 instance Versioned "User" 3 where
   type 3 `VersionOf` "User" = NewUser
 
-instance Upgradable "User" 3 where
-  upgrade = fromOldUser
+instance Migratable "User" 3 where
+  fromPrevious = fromOldUser
 
-fromOldUser :: OldUser -> NewUser
+fromOldUser :: OldUser -> Maybe NewUser
 fromOldUser old
-  = NewUser
+  = Just $ NewUser
       { firstName = FirstName (oldFirstName old)
       , surname   = Surname (oldSurname old)
       , pet       = convertPet (oldPet old)
@@ -155,11 +155,20 @@ data EvenNewerUser
 instance Versioned "User" 4 where
   type 4 `VersionOf` "User" = EvenNewerUser
 
-instance MaybeUpgradable "User" 4 where
-  tryUpgrade = fromNewUser
+instance Migratable "User" 4 where
+  fromPrevious = fromNewUser
 
 fromNewUser :: NewUser -> Maybe EvenNewerUser
 fromNewUser NewUser {..}
   = case pet of
       Just aPet -> Just (EvenNewerUser firstName surname aPet age)
       Nothing   -> Nothing
+
+-- now we can create a newtype that tries parsing any version of our data type
+-- to whichever is the current working version
+newtype APIUser
+  = APIUser { getAPIUser :: EvenNewerUser }
+
+instance JSON.FromJSON APIUser where
+  parseJSON a
+    = APIUser <$> parseJSONVia @"User" @1 @4 a

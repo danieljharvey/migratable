@@ -18,191 +18,117 @@ import           Control.Applicative
 import           Control.Arrow
 import           Control.Monad
 import qualified Data.Aeson                   as JSON
+import qualified Data.Aeson.Types             as JSON
 import           Data.ByteString.Lazy
 import           Data.Kind                    (Type)
 import qualified Data.Text                    as Text
-
 import           Data.Void                    (Void)
 import           GHC.Generics
 import           GHC.Natural
 import           GHC.TypeLits
 
+-- Create an instance of Versioned for each version of your data type
+-- To create a set, pristine should be the same, and the num value should
+-- increment for each new version
 class Versioned (pristine :: Symbol) (num :: Nat) where
   type num `VersionOf` pristine :: Type
 
-class Upgradable (pristine :: Symbol) (num :: Nat) where
-  upgrade
-    :: (num - 1) `VersionOf` pristine
-    -> (num `VersionOf` pristine)
-
-class MaybeUpgradable (pristine :: Symbol) (num :: Nat) where
-  tryUpgrade
+-- Create an instance of Migratable for each new version of your data type,
+-- providing it a function that attempts to convert it from the previous
+-- version
+class Migratable (pristine :: Symbol) (num :: Nat) where
+  fromPrevious
     :: (num - 1) `VersionOf` pristine
     -> Maybe (num `VersionOf` pristine)
 
--- every defined Upgradable gives us a free MaybeUpgradable
-instance {-# OVERLAPPABLE #-}
-  (Upgradable pristine num)
-  => MaybeUpgradable pristine num where
-    tryUpgrade = Just . upgrade @pristine @num
-
 ---
 
+-- A Schema is created for any set of Versioned data types, and provides
+-- `decodeVia` for converting any JSON value to it
 class Schema
   (pristine :: Symbol)
   (earliest :: Nat)
   (target :: Nat) where
-    decodeVia :: ByteString -> Maybe (target `VersionOf` pristine)
+  decodeVia    :: JSON.Value -> Maybe (target `VersionOf` pristine)
+  parseJSONVia :: JSON.Value -> JSON.Parser (target `VersionOf` pristine)
 
 instance
   ( jobs ~ ReversePath earliest target
-  , Migrate jobs target pristine
+  , DecodeAndMigrate jobs target pristine
   , Head jobs ~ target
   , Last jobs ~ earliest
   )
   => Schema pristine earliest target where
-    decodeVia = migrate @jobs @target @pristine
+    decodeVia
+      = join . JSON.parseMaybe (decodeAndMigrate @jobs @target @pristine)
+    parseJSONVia a
+      = collapseInner <$> (decodeAndMigrate @ jobs @target @pristine a)
+      where
+        collapseInner mebs
+           = case mebs of
+               Just a  -> a
 
 ---
-
-class WeakSchema
-  (pristine :: Symbol)
-  (earliest :: Nat)
-  (target :: Nat) where
-  tryDecodeVia :: ByteString -> Maybe (target `VersionOf` pristine)
+-- DecodeAndMigrate attempts to decode a JSON.Value from a list of different
+-- versions, starting with the newest.
+class DecodeAndMigrate (versions :: [Nat]) (target :: Nat) (pristine :: Symbol) where
+  decodeAndMigrate :: JSON.Value -> JSON.Parser (Maybe (target `VersionOf` pristine))
 
 instance
-  ( jobs ~ ReversePath earliest target
-  , TryMigrate jobs target pristine
-  , Head jobs ~ target
-  , Last jobs ~ earliest
-  )
-  => WeakSchema pristine earliest target where
-    tryDecodeVia = tryMigrate @jobs @target @pristine
-
----
-
-class Migrate (versions :: [Nat]) (target :: Nat) (pristine :: Symbol) where
-  migrate :: ByteString -> Maybe (target `VersionOf` pristine)
-
-instance
-  ( Migrate (y ': xs) target pristine
-  , GenerallyUpdate this target pristine
+  ( DecodeAndMigrate (y ': xs) target pristine
+  , Migrate this target pristine
   , JSON.FromJSON (this `VersionOf` pristine)
-  ) => Migrate (this ': y ': xs) target pristine where
-  migrate a
-    =   decodeAndUpdate @this @target @pristine a
-    <|> migrate  @(y ': xs) @target @pristine a
+  ) => DecodeAndMigrate (this ': y ': xs) target pristine where
+    decodeAndMigrate a
+      =   decodeAndMigrate' @this @target @pristine a
+      <|> decodeAndMigrate  @(y ': xs) @target @pristine a
 
 instance
-  ( GenerallyUpdate this target pristine
+  ( Migrate this target pristine
   , JSON.FromJSON (this `VersionOf` pristine)
-  ) => Migrate '[this] target pristine where
-  migrate
-    = decodeAndUpdate @this @target @pristine
+  ) => DecodeAndMigrate '[this] target pristine where
+    decodeAndMigrate = decodeAndMigrate' @this @target @pristine
 
-decodeAndUpdate
+decodeAndMigrate'
   :: forall this target pristine
-   . GenerallyUpdate this target pristine
+   . Migrate this target pristine
   => JSON.FromJSON (this `VersionOf` pristine)
-  => ByteString
-  -> Maybe (target `VersionOf` pristine)
-decodeAndUpdate a
-  =   generallyUpdate @this @target @pristine
-  <$> JSON.decode @(this `VersionOf` pristine) a
+  => JSON.Value
+  -> JSON.Parser (Maybe (target `VersionOf` pristine))
+decodeAndMigrate' a
+  =   migrate @this @target @pristine
+  <$> JSON.parseJSON @(this `VersionOf` pristine) a
 
 ---
-
-class TryMigrate (versions :: [Nat]) (target :: Nat) (pristine :: Symbol) where
-  tryMigrate :: ByteString -> Maybe (target `VersionOf` pristine)
-
-instance
-  ( TryMigrate (y ': xs) target pristine
-  , MaybeUpdate this target pristine
-  , JSON.FromJSON (this `VersionOf` pristine)
-  ) => TryMigrate (this ': y ': xs) target pristine where
-    tryMigrate a
-      =   tryDecodeAndUpdate @this @target @pristine a
-      <|> tryMigrate  @(y ': xs) @target @pristine a
-
-instance
-  ( MaybeUpdate this target pristine
-  , JSON.FromJSON (this `VersionOf` pristine)
-  ) => TryMigrate '[this] target pristine where
-    tryMigrate = tryDecodeAndUpdate @this @target @pristine
-
-tryDecodeAndUpdate
-  :: forall this target pristine
-   . MaybeUpdate this target pristine
-  => JSON.FromJSON (this `VersionOf` pristine)
-  => ByteString
-  -> Maybe (target `VersionOf` pristine)
-tryDecodeAndUpdate
-  =  JSON.decode @(this `VersionOf` pristine)
- >=> maybeUpdate @this @target @pristine
-
----
-
-class GenerallyUpdate (earliest :: Nat) (target :: Nat) (pristine :: Symbol) where
-  generallyUpdate :: earliest `VersionOf` pristine -> (target `VersionOf` pristine)
+-- Migrate turns an earlier version of the data type into a newer version of
+-- the datatype, via all the conversion functions along the way
+class Migrate (earliest :: Nat) (target :: Nat) (pristine :: Symbol) where
+  migrate :: earliest `VersionOf` pristine -> Maybe (target `VersionOf` pristine)
 
 instance
     ( jobs ~ FindPath earliest target
-    , GenerallyUpdate_ jobs pristine
+    , Migrate_ jobs pristine
     , Last jobs ~ target
     , Head jobs ~ earliest
     )
-    => GenerallyUpdate earliest target pristine where
-  generallyUpdate = generallyUpdate_ @jobs @pristine
+    => Migrate earliest target pristine where
+  migrate = migrate_ @jobs @pristine
 
-class GenerallyUpdate_ (versions :: [Nat]) (pristine :: Symbol) where
-  generallyUpdate_
-    :: Head versions `VersionOf` pristine
-    -> (Last versions `VersionOf` pristine)
-
-instance GenerallyUpdate_ '[n] pristine where
-  generallyUpdate_ = id
-
-instance {-# OVERLAPPABLE #-}
-      ( x ~ (y - 1)
-      , Versioned pristine y
-      , Upgradable pristine y
-      , GenerallyUpdate_ (y ': xs) pristine
-      )
-      => GenerallyUpdate_ (x ': y ': xs) pristine where
-  generallyUpdate_
-    = upgrade @pristine @y
-    >>> generallyUpdate_ @(y ': xs) @pristine
-
----
-
-class MaybeUpdate (earliest :: Nat) (target :: Nat) (pristine :: Symbol) where
-  maybeUpdate :: earliest `VersionOf` pristine -> Maybe (target `VersionOf` pristine)
-
-instance
-    ( jobs ~ FindPath earliest target
-    , MaybeUpdate_ jobs pristine
-    , Last jobs ~ target
-    , Head jobs ~ earliest
-    )
-    => MaybeUpdate earliest target pristine where
-  maybeUpdate = maybeUpdate_ @jobs @pristine
-
-class MaybeUpdate_ (versions :: [Nat]) (pristine :: Symbol) where
-  maybeUpdate_
+class Migrate_ (versions :: [Nat]) (pristine :: Symbol) where
+  migrate_
     :: Head versions `VersionOf` pristine
     -> Maybe (Last versions `VersionOf` pristine)
 
-instance MaybeUpdate_ '[n] pristine where
-  maybeUpdate_ = pure
+instance Migrate_ '[n] pristine where
+  migrate_ = pure
 
 instance {-# OVERLAPPABLE #-}
       ( x ~ (y - 1)
       , Versioned pristine y
-      , MaybeUpgradable pristine y
-      , MaybeUpdate_ (y ': xs) pristine
+      , Migratable pristine y
+      , Migrate_ (y ': xs) pristine
       )
-      => MaybeUpdate_ (x ': y ': xs) pristine where
-  maybeUpdate_
-    = tryUpgrade @pristine @y
-      >=> maybeUpdate_ @(y ': xs) @pristine
+      => Migrate_ (x ': y ': xs) pristine where
+  migrate_
+    = fromPrevious @pristine @y
+      >=> migrate_ @(y ': xs) @pristine

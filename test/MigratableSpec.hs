@@ -47,30 +47,32 @@ spec =
   describe "Schema" $ do
     describe "Decoding" $ do
       it "Decodes and converts Older to NewUser" $ do
-        let json = encode (Older "a" "b" "c" 100)
+        let json = toJSON (Older "a" "b" "c" 100)
         let tryDecoding = decodeVia @"User" @1 @3 json
         isJust tryDecoding `shouldBe` True
 
       it "Decodes and converts Older to Older" $ do
-        let tryDecoding2 = decodeVia @"User" @1 @1 (encode (Older "bo" "f" "f" 5))
+        let tryDecoding2 = decodeVia @"User" @1 @1 (toJSON (Older "bo" "f" "f" 5))
         isJust tryDecoding2 `shouldBe` True
 
       it "Can decode any Schema with WeakSchema" $ do
-        let json = encode (Older "don't" "do" "drugs" 5)
-        let tryMaybeDecode = tryDecodeVia @"User" @1 @3 json
+        let json = toJSON (Older "don't" "do" "drugs" 5)
+        let tryMaybeDecode = decodeVia @"User" @1 @3 json
         isJust tryMaybeDecode `shouldBe` True
 
       it "Fails to convert a WeakSchema where the data is invalid" $ do
-        let json = encode (Older "ham" "man" "wham" 5)
-        isJust (tryDecodeVia @"User" @1 @4 json) `shouldBe` False
+        let json = toJSON (Older "ham" "man" "wham" 5)
+        isJust (decodeVia @"User" @1 @4 json) `shouldBe` False
 
       it "Succeeds in converting a WeakSchema" $ do
-        let json = encode (Older "Me" "Yes" "dog" 5)
-        isJust (tryDecodeVia @"User" @1 @4 json) `shouldBe` True
+        let json = toJSON (Older "Me" "Yes" "dog" 5)
+        isJust (decodeVia @"User" @1 @4 json) `shouldBe` True
 
-    describe "Converting" $
-      it "Updates an old object to new" $ do
-        let older = Older "What" "Sure" "great" 5
-        let newUser = generallyUpdate @1 @3 @"User" older
-        firstName newUser `shouldBe` FirstName (Name "What")
+    describe "Using newtype to create a FromJSON instance" $ do
+      it "Converts from Older" $ do
+        let json = encode (Older "Poo" "Woo" "Log" 100)
+        isJust (decode @APIUser json) `shouldBe` True
 
+      it "Fails gracefully" $ do
+        let json = encode ("Horses" :: String)
+        isJust (decode @APIUser json) `shouldBe` False

@@ -51,7 +51,7 @@ extra-source-files:  CHANGELOG.md
 
 library
   -- Modules exported by the library.
-  -- exposed-modules:
+  exposed-modules: Data.Migratable
 
   -- Modules included in this library but not exported.
   -- other-modules:
@@ -62,7 +62,8 @@ library
   -- Other library packages from which modules are imported.
   build-depends:    base >= 4.12
                   , text
-                  , aeson 
+                  , aeson
+                  , bytestring 
 
   -- Directories containing source files.
   hs-source-dirs: src
