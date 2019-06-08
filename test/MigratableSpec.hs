@@ -1,5 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DeriveAnyClass        #-}
+{-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
@@ -20,7 +22,10 @@ import           Data.Maybe
 import           Data.Migratable
 import           Data.Migratable.Examples
 import           Data.Migratable.TypeFamilies
+import           GHC.Generics
 import           Test.Hspec
+import           Test.QuickCheck
+import           Test.QuickCheck.Arbitrary.Generic
 
 -- type equivalence tests
 
@@ -41,6 +46,23 @@ test1 = Refl
 
 test2 :: FindPath 2 2 :~: '[2]
 test2 = Refl
+
+-- schema where all versions are the same thing
+data Same
+  = Same { hello :: String }
+  deriving (Generic, FromJSON, ToJSON)
+
+instance Arbitrary Same where
+  arbitrary = genericArbitrary
+
+instance Versioned "Same" 1 where
+  type 1 `VersionOf` "Same" = Same
+
+instance Versioned "Same" 2 where
+  type 2 `VersionOf` "Same" = Same
+
+instance Migratable "Same" 2 where
+  fromPrevious = pure
 
 spec :: SpecWith ()
 spec =
@@ -76,3 +98,21 @@ spec =
       it "Fails gracefully" $ do
         let json = encode ("Horses" :: String)
         isJust (decode @APIUser json) `shouldBe` False
+
+    describe "Tests how many versions a given JSON type matches" $ do
+      it "Calculates our type matches one version" $ do
+        let json = toJSON (Older "Poo" "Poo" "Poo" 100)
+        matches @1 @4 @"User" json `shouldBe` [1]
+
+      it "Calculates our Same type matches two versions" $ do
+        let json = toJSON (Same "yes")
+        matches @1 @2 @"Same" json `shouldBe` [2,1]
+
+    describe "Uses Arbitrary to generate said tests" $ do
+      it "Checks how many matches we got on our non-matching schema" $ do
+        found <- matchAll @1 @4 @"User"
+        found `shouldBe` Right [1,2,3,4]
+
+      it "Spots our problematic matching schema" $ do
+        found <- matchAll @1 @2 @"Same"
+        found `shouldBe` Left [Duplicates 1 [2,1], Duplicates 2 [2,1]]

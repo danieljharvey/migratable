@@ -17,11 +17,15 @@ module Data.Migratable.Examples where
 
 import           Data.Migratable
 
+import qualified Data.Aeson                        as JSON
+import qualified Data.Text                         as Text
 import           GHC.Generics
 import           GHC.Natural
+import           Test.QuickCheck
+import           Test.QuickCheck.Arbitrary.Generic
+import           Test.QuickCheck.Instances.Natural
+import           Test.QuickCheck.Instances.Text
 
-import qualified Data.Aeson      as JSON
-import qualified Data.Text       as Text
 {-
 
 This is an example data schema that has changed over time.
@@ -41,6 +45,9 @@ data Older
           }
           deriving (Show, Generic, JSON.FromJSON, JSON.ToJSON)
 
+instance Arbitrary Older where
+  arbitrary = genericArbitrary
+
 -- this typeclass associates our type (Older) with a version (1) and a label "User"
 instance Versioned "User" 1 where
   type 1 `VersionOf` "User" = Older
@@ -57,7 +64,10 @@ data OldUser
     , oldPet       :: OldPet
     , oldAge       :: Int
     }
-    deriving (Generic, JSON.FromJSON)
+    deriving (Generic, JSON.FromJSON, JSON.ToJSON)
+
+instance Arbitrary OldUser where
+  arbitrary = genericArbitrary
 
 instance Versioned "User" 2 where
   type 2 `VersionOf` "User" = OldUser
@@ -82,7 +92,10 @@ data OldPet
   = OldDog
   | OldCat
   | NoPet
-  deriving (Generic, JSON.FromJSON)
+  deriving (Generic, JSON.FromJSON, JSON.ToJSON)
+
+instance Arbitrary OldPet where
+  arbitrary = genericArbitrary
 
 -- Version 3
 -- This is a fair old change - and the first one which might not work.
@@ -103,6 +116,9 @@ instance Versioned "User" 3 where
 
 instance Migratable "User" 3 where
   fromPrevious = fromOldUser
+
+instance Arbitrary NewUser where
+  arbitrary = genericArbitrary
 
 fromOldUser :: OldUser -> Maybe NewUser
 fromOldUser old
@@ -126,19 +142,31 @@ newtype Name
   = Name { getName :: Text.Text }
   deriving (Show, Eq, Ord, Generic, JSON.FromJSON, JSON.ToJSON)
 
+instance Arbitrary Name where
+  arbitrary = genericArbitrary
+
 newtype FirstName
   = FirstName { getFirstName :: Name }
   deriving (Show, Eq, Ord, Generic, JSON.FromJSON, JSON.ToJSON)
 
+instance Arbitrary FirstName where
+  arbitrary = genericArbitrary
+
 newtype Surname
   = Surname { getSurname :: Name }
   deriving (Show, Generic, JSON.FromJSON, JSON.ToJSON)
+
+instance Arbitrary Surname where
+  arbitrary = genericArbitrary
 
 data Pet
   = Dog
   | Cat
   | Horse
   deriving (Show, Generic, JSON.FromJSON, JSON.ToJSON)
+
+instance Arbitrary Pet where
+  arbitrary = genericArbitrary
 
 -- Version 4
 
@@ -157,6 +185,9 @@ instance Versioned "User" 4 where
 
 instance Migratable "User" 4 where
   fromPrevious = fromNewUser
+
+instance Arbitrary EvenNewerUser where
+  arbitrary = genericArbitrary
 
 fromNewUser :: NewUser -> Maybe EvenNewerUser
 fromNewUser NewUser {..}

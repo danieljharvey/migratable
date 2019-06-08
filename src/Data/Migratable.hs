@@ -20,12 +20,18 @@ import           Control.Monad
 import qualified Data.Aeson                   as JSON
 import qualified Data.Aeson.Types             as JSON
 import           Data.ByteString.Lazy
+import           Data.Either
 import           Data.Kind                    (Type)
+import           Data.List                    (nub)
+import           Data.Maybe
+import           Data.Proxy
 import qualified Data.Text                    as Text
 import           Data.Void                    (Void)
 import           GHC.Generics
 import           GHC.Natural
 import           GHC.TypeLits
+import           Test.QuickCheck.Arbitrary
+import           Test.QuickCheck.Gen
 
 -- Create an instance of Versioned for each version of your data type
 -- To create a set, pristine should be the same, and the num value should
@@ -77,7 +83,8 @@ class DecodeAndMigrate (versions :: [Nat]) (target :: Nat) (pristine :: Symbol) 
 instance
   ( DecodeAndMigrate (y ': xs) target pristine
   , Migrate this target pristine
-  , JSON.FromJSON (this `VersionOf` pristine)
+  , thisVersion ~ (this `VersionOf` pristine)
+  , JSON.FromJSON thisVersion
   ) => DecodeAndMigrate (this ': y ': xs) target pristine where
     decodeAndMigrate a
       =   decodeAndMigrate' @this @target @pristine a
@@ -85,19 +92,23 @@ instance
 
 instance
   ( Migrate this target pristine
-  , JSON.FromJSON (this `VersionOf` pristine)
+  , thisVersion ~ (this `VersionOf` pristine)
+  , JSON.FromJSON thisVersion
   ) => DecodeAndMigrate '[this] target pristine where
     decodeAndMigrate = decodeAndMigrate' @this @target @pristine
 
 decodeAndMigrate'
-  :: forall this target pristine
-   . Migrate this target pristine
-  => JSON.FromJSON (this `VersionOf` pristine)
+  :: forall this target pristine thisVersion targetVersion
+   . ( Migrate this target pristine
+     , thisVersion ~ (this `VersionOf` pristine)
+     , targetVersion ~ (target `VersionOf` pristine)
+     , JSON.FromJSON thisVersion
+     )
   => JSON.Value
-  -> JSON.Parser (Maybe (target `VersionOf` pristine))
+  -> JSON.Parser (Maybe targetVersion)
 decodeAndMigrate' a
   =   migrate @this @target @pristine
-  <$> JSON.parseJSON @(this `VersionOf` pristine) a
+  <$> JSON.parseJSON @thisVersion a
 
 ---
 -- Migrate turns an earlier version of the data type into a newer version of
@@ -132,3 +143,130 @@ instance {-# OVERLAPPABLE #-}
   migrate_
     = fromPrevious @pristine @y
       >=> migrate_ @(y ': xs) @pristine
+
+-- | An issue with different schemas like this is that a particular JSON blob
+-- | could be accidentally compatible with multiple decoders
+-- | Matching allows one to take a piece of JSON and try it against all versions
+-- | ideally it would match only one.
+
+class Matching (earliest :: Nat) (latest :: Nat) (pristine :: Symbol) where
+  matches :: JSON.Value -> [Integer]
+
+instance
+  ( jobs ~ FindPath earliest latest
+  , Matching_ jobs pristine
+  , Last jobs ~ latest
+  , Head jobs ~ earliest
+  )
+  => Matching earliest latest pristine where
+    matches json
+      = matches_ @jobs @pristine json []
+
+class Matching_ (versions :: [Nat]) (pristine :: Symbol) where
+  matches_ :: JSON.Value -> [Integer] -> [Integer]
+
+instance
+  ( x ~ (y - 1)
+  , thisVersion ~ (x `VersionOf` pristine)
+  , KnownNat x
+  , Versioned pristine y
+  , Migratable pristine y
+  , JSON.FromJSON thisVersion
+  , Matching_ (y ': xs) pristine
+  )
+  => Matching_ (x ': y ': xs) pristine where
+    matches_ json vals
+      = rest newVal
+      where
+         newVal
+           = if isJust (JSON.parseMaybe (JSON.parseJSON @thisVersion) json)
+             then [natVal (Proxy :: Proxy x)] <> vals
+             else vals
+         rest a
+           = matches_ @(y ': xs) @pristine json a
+
+instance
+  ( KnownNat x
+  , thisVersion ~ (x `VersionOf` pristine)
+  , JSON.FromJSON thisVersion
+  )
+  => Matching_ (x ': '[]) pristine where
+    matches_ json vals
+      = if isJust (JSON.parseMaybe (JSON.parseJSON @thisVersion) json)
+        then [natVal (Proxy :: Proxy x)] <> vals
+        else vals
+
+class MatchAll (earliest :: Nat) (latest :: Nat) (pristine :: Symbol) where
+  matchAll :: IO (Either [MatchError] [Integer])
+
+instance
+  ( jobs ~ FindPath earliest latest
+  , MatchAll_ jobs earliest latest pristine
+  , Last jobs ~ latest
+  , Head jobs ~ earliest
+  )
+  => MatchAll earliest latest pristine where
+    matchAll = do
+      matched <- matchAll_ @jobs @earliest @latest @pristine []
+      case partitionEithers matched of
+          ([], as)    -> pure $ Right as
+          (errors, _) -> pure $ Left errors
+
+data MatchError
+  = Duplicates Integer [Integer]
+  | CouldNotRead Integer
+  deriving (Eq, Ord, Show)
+
+class MatchAll_ (versions :: [Nat]) (earliest :: Nat) (latest :: Nat) (pristine :: Symbol) where
+  matchAll_ :: [(Either MatchError Integer)] -> IO [(Either MatchError Integer)]
+
+valuesToEither :: Integer -> [Integer] -> Either MatchError Integer
+valuesToEither x xs
+  | xs == [x]             = Right x
+  | Prelude.length xs > 1 = Left (Duplicates x xs)
+  | otherwise             = Left (CouldNotRead x)
+
+instance
+  ( x ~ (y - 1)
+  , KnownNat x
+  , jobs ~ FindPath earliest latest
+  , Head jobs ~ earliest
+  , Last jobs ~ latest
+  , thisVersion ~ (x `VersionOf` pristine)
+  , Arbitrary thisVersion
+  , JSON.ToJSON thisVersion
+  , Matching_ jobs pristine
+  , MatchAll_ (y ': xs) earliest latest pristine
+  )
+  => MatchAll_ (x ': y ': xs) earliest latest pristine where
+    matchAll_ xs = do
+      items <- sample' (arbitrary @thisVersion)
+      let unique =  valuesToEither (natVal (Proxy :: Proxy x))
+                 $  combineArrays
+                 $  matches @earliest @latest @pristine . JSON.toJSON
+                <$> items
+      matchAll_ @(y ': xs) @earliest @latest @pristine (xs <> [unique])
+
+
+instance
+  ( KnownNat x
+  , jobs ~ FindPath earliest latest
+  , Head jobs ~ earliest
+  , Last jobs ~ latest
+  , thisVersion ~ (x `VersionOf` pristine)
+  , Arbitrary thisVersion
+  , JSON.ToJSON thisVersion
+  , Matching_ jobs pristine
+  )
+  => MatchAll_ (x ': '[]) earliest latest pristine where
+    matchAll_ xs = do
+      items <- sample' (arbitrary @thisVersion)
+      let unique =  valuesToEither (natVal (Proxy :: Proxy x))
+                 $  combineArrays
+                 $  matches @earliest @latest @pristine . JSON.toJSON
+                <$> items
+      pure $ xs <> [unique]
+
+
+combineArrays :: (Eq a) => [[a]] -> [a]
+combineArrays = nub . mconcat
