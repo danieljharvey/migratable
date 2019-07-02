@@ -5,7 +5,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Data.Migratable.TypeFamilies where
 
-import           GHC.Natural
 import           GHC.TypeLits
 
 type family (xs :: [k]) ++ (ys :: [k]) :: [k] where

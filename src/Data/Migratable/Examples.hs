@@ -1,30 +1,25 @@
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveGeneric         #-}
-{-# LANGUAGE FlexibleContexts      #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE PolyKinds             #-}
 {-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
-{-# LANGUAGE UndecidableInstances  #-}
 module Data.Migratable.Examples where
 
-import           Data.Migratable
-
 import qualified Data.Aeson                        as JSON
+import           Data.Migratable.DecodeAndMigrate  ()
+import           Data.Migratable.Migrate           ()
+import           Data.Migratable.Schema
+import           Data.Migratable.Versioned
 import qualified Data.Text                         as Text
 import           GHC.Generics
 import           GHC.Natural
 import           Test.QuickCheck
 import           Test.QuickCheck.Arbitrary.Generic
-import           Test.QuickCheck.Instances.Natural
-import           Test.QuickCheck.Instances.Text
+import           Test.QuickCheck.Instances.Natural ()
+import           Test.QuickCheck.Instances.Text    ()
 
 {-
 
