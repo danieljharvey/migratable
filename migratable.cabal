@@ -69,6 +69,7 @@ library
                   , generic-arbitrary
                   , QuickCheck
                   , quickcheck-instances 
+                  , transformers
 
   -- Directories containing source files.
   hs-source-dirs: src
@@ -90,3 +91,4 @@ test-suite unit-tests
                  , hspec-discover
                  , QuickCheck
                  , quickcheck-instances
+                 , transformers

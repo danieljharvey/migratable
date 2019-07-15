@@ -64,6 +64,9 @@ instance Versioned "Same" 2 where
 instance Migratable "Same" 2 where
   fromPrevious = pure
 
+newOutput :: OutputFour
+newOutput = OutputFour "hello"
+
 spec :: SpecWith ()
 spec =
   describe "Schema" $ do
@@ -98,6 +101,17 @@ spec =
       it "Fails gracefully" $ do
         let json = encode ("Horses" :: String)
         isJust (decode @APIUser json) `shouldBe` False
+
+    describe "Comigrate works too" $ do
+      it "Creates an OutputOne from an OutputFour" $ do
+        let output = comigrate @1 @4 @"UserResponse" newOutput
+        isJust output `shouldBe` True
+
+    describe "Request/Response works" $ do
+      it "Turns a version 1 request into version 4, runs a function, then converts the response back" $ do
+        let input = Older "Poo" "Woo" "dog" 100
+        output <- apiVersionOne input
+        isJust output `shouldBe` True
 
     describe "Tests how many versions a given JSON type matches" $ do
       it "Calculates our type matches one version" $ do

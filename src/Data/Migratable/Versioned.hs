@@ -28,3 +28,10 @@ class Migratable (label :: Symbol) (num :: Nat) where
   fromPrevious
     :: (num - 1) `VersionOf` label
     -> Maybe (num `VersionOf` label)
+
+-- Create an instance of Comigratable for each version of your data type
+-- in situations where you want to go backwards to older versions
+class Comigratable (label :: Symbol) (num :: Nat) where
+  fromNext
+    :: (num + 1) `VersionOf` label
+    -> Maybe (num `VersionOf` label)

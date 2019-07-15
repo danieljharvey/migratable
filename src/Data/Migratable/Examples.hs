@@ -11,6 +11,7 @@ module Data.Migratable.Examples where
 import qualified Data.Aeson                        as JSON
 import           Data.Migratable.DecodeAndMigrate  ()
 import           Data.Migratable.Migrate           ()
+import           Data.Migratable.RequestResponse
 import           Data.Migratable.Schema
 import           Data.Migratable.Versioned
 import qualified Data.Text                         as Text
@@ -198,3 +199,56 @@ newtype APIUser
 instance JSON.FromJSON APIUser where
   parseJSON a
     = APIUser <$> parseJSONVia @"User" @1 @4 a
+
+
+data OutputOne
+  = OutputOne { thing1 :: String }
+  deriving (Eq, Ord, Show)
+
+instance Versioned "UserResponse" 1 where
+  type 1 `VersionOf` "UserResponse" = OutputOne
+
+instance Comigratable "UserResponse" 1 where
+  fromNext a
+    = Just $ OutputOne { thing1 = thing2 a }
+
+data OutputTwo
+  = OutputTwo { thing2 :: String }
+  deriving (Eq, Ord, Show)
+
+instance Versioned "UserResponse" 2 where
+  type 2 `VersionOf` "UserResponse" = OutputTwo
+
+instance Comigratable "UserResponse" 2 where
+  fromNext a
+    = Just $ OutputTwo { thing2 = thing3 a }
+
+data OutputThree
+  = OutputThree { thing3 :: String }
+  deriving (Eq, Ord, Show)
+
+instance Versioned "UserResponse" 3 where
+  type 3 `VersionOf` "UserResponse" = OutputThree
+
+instance Comigratable "UserResponse" 3 where
+  fromNext a
+    = Just $ OutputThree { thing3 = thing4 a }
+
+data OutputFour
+  = OutputFour { thing4 :: String }
+  deriving (Eq, Ord, Show)
+
+instance Versioned "UserResponse" 4 where
+  type 4 `VersionOf` "UserResponse" = OutputFour
+
+-- | Here api is some sort of effectful thing - probably the mechanics of
+-- | your app such as a DB call
+-- | We can use migrate and comigrate to bring the data up to
+-- | whichever version we want to operate on
+-- | then push it back down again
+apiVersionOne :: Older -> IO (Maybe OutputOne)
+apiVersionOne
+  = profunctorThing @1 @4 @"User" @"UserResponse" api
+  where
+    api :: EvenNewerUser -> IO OutputFour
+    api user = pure $ OutputFour (show (newerFirstName user))
