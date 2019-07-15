@@ -176,6 +176,7 @@ data EvenNewerUser
     deriving (Show, Generic, JSON.FromJSON, JSON.ToJSON)
 
 ---
+
 instance Versioned "User" 4 where
   type 4 `VersionOf` "User" = EvenNewerUser
 
@@ -201,6 +202,12 @@ instance JSON.FromJSON APIUser where
     = APIUser <$> parseJSONVia @"User" @1 @4 a
 
 
+-- | Now it turns out we also had some sort of very basic output type to match
+-- | each of these user versions
+-- | Ideally - we'd like to receive requests in the "User" set of values
+-- | but also return responses in the corresponding "UserResponse" values
+-- | How can we do this?
+
 data OutputOne
   = OutputOne { thing1 :: String }
   deriving (Eq, Ord, Show)
@@ -211,6 +218,8 @@ instance Versioned "UserResponse" 1 where
 instance Comigratable "UserResponse" 1 where
   fromNext a
     = Just $ OutputOne { thing1 = thing2 a }
+
+---
 
 data OutputTwo
   = OutputTwo { thing2 :: String }
@@ -223,6 +232,8 @@ instance Comigratable "UserResponse" 2 where
   fromNext a
     = Just $ OutputTwo { thing2 = thing3 a }
 
+---
+
 data OutputThree
   = OutputThree { thing3 :: String }
   deriving (Eq, Ord, Show)
@@ -234,6 +245,8 @@ instance Comigratable "UserResponse" 3 where
   fromNext a
     = Just $ OutputThree { thing3 = thing4 a }
 
+---
+
 data OutputFour
   = OutputFour { thing4 :: String }
   deriving (Eq, Ord, Show)
@@ -241,11 +254,15 @@ data OutputFour
 instance Versioned "UserResponse" 4 where
   type 4 `VersionOf` "UserResponse" = OutputFour
 
--- | Here api is some sort of effectful thing - probably the mechanics of
+-- | Here assume 'api' is some sort of effectful thing - probably the mechanics of
 -- | your app such as a DB call
 -- | We can use migrate and comigrate to bring the data up to
 -- | whichever version we want to operate on
 -- | then push it back down again
+-- |
+-- | Note that here the type we accept must be known
+-- | This means we know which response type we are going to return if this
+-- | works
 apiVersionOne :: Older -> IO (Maybe OutputOne)
 apiVersionOne
   = profunctorThing @1 @4 @"User" @"UserResponse" api
