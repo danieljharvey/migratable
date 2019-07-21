@@ -13,11 +13,12 @@
 module Data.Migratable.RequestResponse where
 
 import           Control.Monad
-import           Control.Monad.Trans.Maybe
+import           Control.Monad.Trans.Except
 import           Data.Kind
 import           Data.Migratable.Comigrate
 import           Data.Migratable.DecodeAndMigrate  ()
 import           Data.Migratable.Migrate
+import           Data.Migratable.MigrationError
 import           Data.Migratable.Versioned
 import           GHC.TypeLits
 import           Test.QuickCheck.Instances.Natural ()
@@ -33,34 +34,34 @@ class RequestResponse
     (request :: Symbol)
     (response :: Symbol)
     (m :: Type -> Type) where
-  profunctorThing
+  withMigration
     :: Monad m
     => (target `VersionOf` request -> m (target `VersionOf` response))
     -> earliest `VersionOf` request
-    -> m (Maybe (earliest `VersionOf` response))
+    -> m (Either MigrationError (earliest `VersionOf` response))
 
 instance
   ( Monad m
   , Migrate earliest target request
   , Comigrate earliest target response)
   => RequestResponse earliest target request response m where
-  profunctorThing f a
-    = runMaybeT $ (decode >=> compute >=> reencode) a
+  withMigration f a
+    = runExceptT $ (decode >=> compute >=> reencode) a
     where
       decode
         :: (earliest `VersionOf` request)
-        -> MaybeT m (target `VersionOf` request)
+        -> ExceptT MigrationError m (target `VersionOf` request)
       decode
-        = MaybeT . pure . migrate @earliest @target @request
+        = ExceptT . pure . migrate @earliest @target @request
 
       compute
         :: (target `VersionOf` request)
-        -> MaybeT m (target `VersionOf` response)
+        -> ExceptT MigrationError m (target `VersionOf` response)
       compute a'
-        = MaybeT $ Just <$> f a'
+        = ExceptT $ Right <$> f a'
 
       reencode
         :: (target `VersionOf` response)
-        -> MaybeT m (earliest `VersionOf` response)
+        -> ExceptT MigrationError m (earliest `VersionOf` response)
       reencode
-        = MaybeT . pure . comigrate @earliest @target @response
+        = ExceptT . pure . comigrate @earliest @target @response

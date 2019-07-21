@@ -13,6 +13,7 @@
 module Data.Migratable.Schema where
 
 import           Data.Migratable.DecodeAndMigrate (DecodeAndMigrate (..))
+import           Data.Migratable.MigrationError
 import           Data.Migratable.TypeFamilies
 import           Data.Migratable.Versioned
 
@@ -27,21 +28,25 @@ class Schema
   (label :: Symbol)
   (earliest :: Nat)
   (target :: Nat) where
-  decodeVia    :: JSON.Value -> Maybe (target `VersionOf` label)
+  decodeVia    :: JSON.Value -> Either MigrationError (target `VersionOf` label)
   parseJSONVia :: JSON.Value -> JSON.Parser (target `VersionOf` label)
 
 instance
   ( jobs ~ ReversePath earliest target
+  , KnownSymbol label
   , DecodeAndMigrate jobs target label
   , Head jobs ~ target
   , Last jobs ~ earliest
   )
   => Schema label earliest target where
-    decodeVia
-      = join . JSON.parseMaybe (decodeAndMigrate @jobs @target @label)
+    decodeVia a
+      = join $ wrapDecodeError
+          (reifyLabel @label)
+          (JSON.parseEither (decodeAndMigrate @jobs @target @label) a)
+
     parseJSONVia a
       = collapseInner <$> (decodeAndMigrate @ jobs @target @label a)
       where
         collapseInner mebs
            = case mebs of
-               Just a  -> a
+               Right a  -> a

@@ -11,6 +11,7 @@ module Data.Migratable.Examples where
 import qualified Data.Aeson                        as JSON
 import           Data.Migratable.DecodeAndMigrate  ()
 import           Data.Migratable.Migrate           ()
+import           Data.Migratable.MigrationError
 import           Data.Migratable.RequestResponse
 import           Data.Migratable.Schema
 import           Data.Migratable.Versioned
@@ -263,9 +264,9 @@ instance Versioned "UserResponse" 4 where
 -- | Note that here the type we accept must be known
 -- | This means we know which response type we are going to return if this
 -- | works
-apiVersionOne :: Older -> IO (Maybe OutputOne)
+apiVersionOne :: Older -> IO (Either MigrationError OutputOne)
 apiVersionOne
-  = profunctorThing @1 @4 @"User" @"UserResponse" api
+  = withMigration @1 @4 @"User" @"UserResponse" api
   where
     api :: EvenNewerUser -> IO OutputFour
     api user = pure $ OutputFour (show (newerFirstName user))

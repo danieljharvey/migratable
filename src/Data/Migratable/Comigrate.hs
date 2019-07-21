@@ -12,7 +12,7 @@
 {-# LANGUAGE UndecidableInstances  #-}
 module Data.Migratable.Comigrate where
 
-import           Control.Monad
+import           Data.Migratable.MigrationError
 import           Data.Migratable.TypeFamilies
 import           Data.Migratable.Versioned
 import           GHC.TypeLits
@@ -20,7 +20,9 @@ import           GHC.TypeLits
 -- Comigrate turns a version of the data type into an earlier version of
 -- the datatype, via all the conversion functions along the way
 class Comigrate (target :: Nat) (current :: Nat) (label :: Symbol) where
-  comigrate :: current `VersionOf` label -> Maybe (target `VersionOf` label)
+  comigrate
+    :: current `VersionOf` label
+    -> Either MigrationError (target `VersionOf` label)
 
 instance
     ( jobs ~ ReversePath current target
@@ -34,18 +36,21 @@ instance
 class Comigrate_ (versions :: [Nat]) (label :: Symbol) where
   comigrate_
     :: Head versions `VersionOf` label
-    -> Maybe (Last versions `VersionOf` label)
+    -> Either MigrationError (Last versions `VersionOf` label)
 
 instance Comigrate_ '[n] label where
   comigrate_ = pure
 
 instance {-# OVERLAPPABLE #-}
       ( x ~ (y + 1)
+      , KnownNat x
+      , KnownSymbol label
       , Versioned label y
       , Comigratable label y
       , Comigrate_ (y ': xs) label
       )
       => Comigrate_ (x ': y ': xs) label where
-  comigrate_
-    = fromNext @label @y
-      >=> comigrate_ @(y ': xs) @label
+  comigrate_ a
+    = case fromNext @label @y a of
+        Nothing  -> Left (ComigrateError (reifyLabel @label) (reifyVersion @x))
+        Just val -> comigrate_ @(y ': xs) @label val
