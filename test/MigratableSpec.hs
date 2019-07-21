@@ -18,6 +18,7 @@
 module MigratableSpec where
 
 import           Data.Aeson
+import           Data.Either
 import           Data.Maybe
 import           Data.Migratable
 import           Data.Migratable.Examples
@@ -74,24 +75,24 @@ spec =
       it "Decodes and converts Older to NewUser" $ do
         let json = toJSON (Older "a" "b" "c" 100)
         let tryDecoding = decodeVia @"User" @1 @3 json
-        isJust tryDecoding `shouldBe` True
+        isRight tryDecoding `shouldBe` True
 
       it "Decodes and converts Older to Older" $ do
         let tryDecoding2 = decodeVia @"User" @1 @1 (toJSON (Older "bo" "f" "f" 5))
-        isJust tryDecoding2 `shouldBe` True
+        isRight tryDecoding2 `shouldBe` True
 
       it "Can decode any Schema with WeakSchema" $ do
         let json = toJSON (Older "don't" "do" "drugs" 5)
         let tryMaybeDecode = decodeVia @"User" @1 @3 json
-        isJust tryMaybeDecode `shouldBe` True
+        isRight tryMaybeDecode `shouldBe` True
 
       it "Fails to convert a WeakSchema where the data is invalid" $ do
         let json = toJSON (Older "ham" "man" "wham" 5)
-        isJust (decodeVia @"User" @1 @4 json) `shouldBe` False
+        isRight (decodeVia @"User" @1 @4 json) `shouldBe` False
 
       it "Succeeds in converting a WeakSchema" $ do
         let json = toJSON (Older "Me" "Yes" "dog" 5)
-        isJust (decodeVia @"User" @1 @4 json) `shouldBe` True
+        isRight (decodeVia @"User" @1 @4 json) `shouldBe` True
 
     describe "Using newtype to create a FromJSON instance" $ do
       it "Converts from Older" $ do
@@ -105,13 +106,13 @@ spec =
     describe "Comigrate works too" $ do
       it "Creates an OutputOne from an OutputFour" $ do
         let output = comigrate @1 @4 @"UserResponse" newOutput
-        isJust output `shouldBe` True
+        isRight output `shouldBe` True
 
     describe "Request/Response works" $ do
       it "Turns a version 1 request into version 4, runs a function, then converts the response back" $ do
         let input = Older "Poo" "Woo" "dog" 100
         output <- apiVersionOne input
-        isJust output `shouldBe` True
+        isRight output `shouldBe` True
 
     describe "Tests how many versions a given JSON type matches" $ do
       it "Calculates our type matches one version" $ do

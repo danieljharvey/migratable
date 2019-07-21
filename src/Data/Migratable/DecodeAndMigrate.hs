@@ -13,17 +13,20 @@
 module Data.Migratable.DecodeAndMigrate where
 
 import           Data.Migratable.Migrate
+import           Data.Migratable.MigrationError
 import           Data.Migratable.Versioned
 
-import           Control.Applicative       ((<|>))
-import qualified Data.Aeson                as JSON
-import qualified Data.Aeson.Types          as JSON
+import           Control.Applicative            ((<|>))
+import qualified Data.Aeson                     as JSON
+import qualified Data.Aeson.Types               as JSON
 import           GHC.TypeLits
 
 -- DecodeAndMigrate attempts to decode a JSON.Value from a list of different
 -- versions, starting with the newest.
 class DecodeAndMigrate (versions :: [Nat]) (target :: Nat) (label :: Symbol) where
-  decodeAndMigrate :: JSON.Value -> JSON.Parser (Maybe (target `VersionOf` label))
+  decodeAndMigrate
+    :: JSON.Value
+    -> JSON.Parser (Either MigrationError (target `VersionOf` label))
 
 instance
   ( DecodeAndMigrate (y ': xs) target label
@@ -50,7 +53,7 @@ decodeAndMigrate'
      , JSON.FromJSON thisVersion
      )
   => JSON.Value
-  -> JSON.Parser (Maybe targetVersion)
+  -> JSON.Parser (Either MigrationError targetVersion)
 decodeAndMigrate' a
   =   migrate @this @target @label
   <$> JSON.parseJSON @thisVersion a
